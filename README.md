@@ -1,6 +1,6 @@
 # Contact Manager API
 
-A simple Contact Manager REST API built with **FastAPI** that supports full CRUD operations with JSON file persistence.
+A RESTful Contact Manager API built using **FastAPI** and **SQLite** that supports full CRUD operations with proper validation, database persistence, and duplicate prevention.
 
 ## Features
 
@@ -10,32 +10,49 @@ A simple Contact Manager REST API built with **FastAPI** that supports full CRUD
 * Update contact details
 * Delete a contact
 * Input validation
-* Duplicate phone/email prevention
-* Persistent storage using `contacts.json`
+* Duplicate phone/email prevention using database constraints
+* Persistent storage using **SQLite**
+* Auto-generated interactive API documentation using Swagger UI
+
+---
 
 ## Tech Stack
 
 * Python
 * FastAPI
 * Pydantic
-* JSON (for storage)
+* SQLite3
+
+---
+
+## Project Structure
+
+```text
+Contact_Manager_API/
+│── main.py
+│── contacts.db
+│── requirements.txt
+│── README.md
+```
+
+---
 
 ## Setup Instructions
 
-### 1. Clone the repository
+### 1. Clone the Repository
 
 ```bash
 git clone <your-repo-link>
 cd Contact_Manager_API
 ```
 
-### 2. Create virtual environment
+### 2. Create Virtual Environment
 
 ```bash
 python -m venv .venv
 ```
 
-### 3. Activate virtual environment
+### 3. Activate Virtual Environment
 
 #### Windows
 
@@ -49,11 +66,13 @@ python -m venv .venv
 source .venv/bin/activate
 ```
 
-### 4. Install dependencies
+### 4. Install Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
+
+---
 
 ## Run the API
 
@@ -69,22 +88,36 @@ Server will run on:
 http://127.0.0.1:8000
 ```
 
-Swagger API docs:
+---
+
+## API Documentation
+
+Swagger UI:
 
 ```text
 http://127.0.0.1:8000/docs
 ```
 
+ReDoc:
+
+```text
+http://127.0.0.1:8000/redoc
+```
+
+---
+
 ## API Endpoints
 
-| Method | Endpoint            | Description             |
-| ------ | ------------------- | ----------------------- |
-| GET    | `/`                 | Welcome message         |
-| GET    | `/contacts`         | Get all contacts        |
-| GET    | `/contacts/{phone}` | Search contact by phone |
-| POST   | `/contacts`         | Add new contact         |
-| PUT    | `/contacts/{phone}` | Update contact          |
-| DELETE | `/contacts/{phone}` | Delete contact          |
+| Method | Endpoint            | Description                    |
+| ------ | ------------------- | ------------------------------ |
+| GET    | `/`                 | Welcome message                |
+| GET    | `/contacts`         | Get all contacts               |
+| GET    | `/contacts/{phone}` | Search contact by phone number |
+| POST   | `/contacts`         | Add a new contact              |
+| PUT    | `/contacts/{phone}` | Update existing contact        |
+| DELETE | `/contacts/{phone}` | Delete contact                 |
+
+---
 
 ## Validation Rules
 
@@ -95,25 +128,34 @@ http://127.0.0.1:8000/docs
 ### Phone Number
 
 * Must contain only digits
-* Must be exactly 10 digits
+* Must be exactly **10 digits**
 * Must be unique
 
 ### Email
 
-* Valid email format required
+* Must be a valid email format
 * Must be unique
 
-## Storage
+---
 
-Contacts are stored in a local:
+## Database Schema
 
-```text
-contacts.json
+The API uses a SQLite database (`contacts.db`) with the following schema:
+
+```sql
+CREATE TABLE contacts(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    phone TEXT NOT NULL UNIQUE,
+    email TEXT NOT NULL UNIQUE
+);
 ```
 
-file to persist data even after server restart.
+---
 
 ## Example Contact Format
+
+### Request Body
 
 ```json
 {
@@ -122,3 +164,33 @@ file to persist data even after server restart.
   "email": "johndoe@gmail.com"
 }
 ```
+
+### Response Example
+
+```json
+{
+  "message": "Contact added successfully",
+  "data": {
+    "id": 1,
+    "name": "John Doe",
+    "phone": "9876543210",
+    "email": "johndoe@gmail.com"
+  }
+}
+```
+
+---
+
+## Error Handling
+
+The API returns meaningful HTTP status codes:
+
+| Status Code | Meaning                         |
+| ----------- | ------------------------------- |
+| 200         | Success                         |
+| 201         | Resource created successfully   |
+| 400         | Invalid input                   |
+| 404         | Contact not found               |
+| 409         | Duplicate phone number or email |
+
+---

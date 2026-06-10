@@ -1,29 +1,30 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, EmailStr
-import json
-import os
+import sqlite3
 
 app = FastAPI()
-
 class Contact(BaseModel):
     name: str
     phone: str
     email: EmailStr
-
-def load_contacts():
-    try:
-        if os.path.exists("contacts.json"):
-            with open("contacts.json", "r") as file:
-                data = json.load(file)
-            return data
-        else:
-            return []
-    except json.JSONDecodeError:
-        return []
-            
-def save_contacts(contacts):
-    with open("contacts.json", "w") as file:
-        json.dump(contacts, file, indent=2)
+    
+def get_connection():
+    con = sqlite3.connect("contacts.db")
+    cursor = con.cursor()
+    return con, cursor
+    
+def initialize_db():
+    con, cursor = get_connection()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS contacts(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            phone TEXT NOT NULL UNIQUE,
+            email TEXT NOT NULL UNIQUE
+        )
+    """)
+    con.commit()
+    con.close()
         
 def normalize_contact(contact: Contact):
     contact_dict = contact.model_dump()
@@ -48,26 +49,19 @@ def validate_contact(normalized_contact: dict):
                 status_code=400,
                 detail="Phone number must be of 10 digits"
             )
-    
-def duplicate_phone_check(contacts: list, phone: str, ignore_phone=None):
-    for con in contacts:
-        if con["phone"]!=ignore_phone:
-            if con["phone"]==phone:
-                raise HTTPException(
-                    status_code=409,
-                    detail="Phone number already exists"
-                )
 
-def duplicate_email_check(contacts: list, email: str, ignore_phone=None):
-    for con in contacts:
-        if con["phone"]!=ignore_phone:
-            if con["email"]==email:
-                raise HTTPException(
-                    status_code=409,
-                    detail="Email already exists"
-                )
+def serialize_contact(contact):
+    if not contact:
+        return None
+    contact_dict = {
+        "id": contact[0],
+        "name": contact[1],
+        "phone": contact[2],
+        "email": contact[3]
+    }
+    return contact_dict
 
-contacts = load_contacts()
+initialize_db()
 
 @app.get("/")
 def welcome_message():
@@ -75,8 +69,17 @@ def welcome_message():
 
 @app.get("/contacts")
 def display_contacts():
-    return contacts
-
+    con, cursor = get_connection()
+    try:
+        cursor.execute("""
+                    SELECT * FROM contacts
+                    """)
+        contacts = cursor.fetchall()
+    finally:
+        con.close()
+    contacts_list = [serialize_contact(contact) for contact in contacts]
+    return contacts_list
+    
 @app.post("/contacts", status_code=201)
 def add_contact(contact: Contact):
     
@@ -84,34 +87,66 @@ def add_contact(contact: Contact):
     
     validate_contact(new_contact)
     
-    duplicate_phone_check(contacts, new_contact["phone"])
-    duplicate_email_check(contacts, new_contact["email"])
-            
-    contacts.append(new_contact)
-    save_contacts(contacts)
-    return {"message": "Contact added successfully", "contact": new_contact}
+    con, cursor = get_connection()
+    try:
+        cursor.execute("""
+            INSERT INTO contacts (name, phone, email) VALUES (?,?,?)""",
+            (new_contact["name"], new_contact["phone"], new_contact["email"])
+            )
+        rowid = cursor.lastrowid
+        new_contact["id"] = rowid
+        con.commit()
+    except sqlite3.IntegrityError:
+        raise HTTPException(
+            status_code=409,
+            detail="Phone number or email already exists"
+        )
+    finally:
+        con.close()
+    return {"message": "Contact added successfully", "data":  new_contact}
 
 @app.delete("/contacts/{phone}")
 def delete_contact(phone: str):
-    for index, contact in enumerate(contacts):
-        if contact["phone"] == phone:
-            deleted_contact = contacts.pop(index)
-            save_contacts(contacts)
-            return {"message": "Contact Deleted Successfully", "data": deleted_contact}
-    raise HTTPException(
-        status_code=404,
-        detail="Contact not found"
-    )
+    con, cursor = get_connection()
+    try:
+        cursor.execute("""
+                    SELECT * FROM contacts WHERE phone=?
+                    """,
+                    (phone,))
+        deleted_contact = cursor.fetchone()
+        if not deleted_contact:
+            raise HTTPException(
+                status_code=404,
+                detail="Contact not found"
+            )
+        cursor.execute("""
+                    DELETE FROM contacts WHERE phone=?
+                    """,
+                    (phone,))
+        con.commit()
+    finally:
+        con.close()
+    deleted_contact = serialize_contact(deleted_contact)
+    return {"message": "Contact Deleted Successfully", "data": deleted_contact}
     
 @app.get("/contacts/{phone}")
 def search_contact(phone: str):
-    for contact in contacts:
-        if contact["phone"] == phone:
-            return {"message": "Contact Found!","data": contact}
-    raise HTTPException(
-        status_code=404,
-        detail="Contact not found!"
-    )
+    con, cursor = get_connection()
+    try:
+        cursor.execute("""
+                    SELECT * FROM contacts WHERE phone=?
+                    """,
+                    (phone,))
+        contact = cursor.fetchone()
+        if not contact:
+            raise HTTPException(
+                status_code=404,
+                detail="Contact not found"
+            )
+    finally:
+        con.close()
+    contact = serialize_contact(contact)
+    return {"message": "Contact Found", "data": contact}
 
 @app.put("/contacts/{phone}")
 def update_contact(phone: str, contact: Contact):
@@ -119,20 +154,37 @@ def update_contact(phone: str, contact: Contact):
     
     validate_contact(updated_contact)
     
-    duplicate_phone_check(contacts, updated_contact["phone"], ignore_phone=phone)
-    duplicate_email_check(contacts, updated_contact["email"], ignore_phone=phone)
-    
-    for index, con in enumerate(contacts):
-        if con["phone"] == phone:
-            contacts[index] = updated_contact
-            save_contacts(contacts)
-            return {"message": "Contact updated successfully", "data": updated_contact}
-    raise HTTPException(
-        status_code=404,
-        detail="Contact not found"
-    )
-            
-            
-            
-            
-        
+    con, cursor = get_connection()
+    try:
+        cursor.execute("""
+                    SELECT * FROM contacts WHERE phone=?   
+                    """,
+                    (phone,)
+                    )
+        contact_to_update = cursor.fetchone()
+        if not contact_to_update:
+            raise HTTPException(
+                status_code=404,
+                detail="Contact not found"
+            )
+        updated_contact["id"]=contact_to_update[0]
+        try:
+            cursor.execute("""
+                UPDATE contacts 
+                SET 
+                    name=?, 
+                    phone=?, 
+                    email=? 
+                WHERE phone=?
+                """,
+                (updated_contact["name"], updated_contact["phone"], updated_contact["email"], phone)
+                )
+            con.commit()
+        except sqlite3.IntegrityError:
+            raise HTTPException(
+                status_code=409,
+                detail="Phone number or email already exists"
+            )
+    finally:
+        con.close()
+    return {"message": "Contact updated successfully", "data": updated_contact}
